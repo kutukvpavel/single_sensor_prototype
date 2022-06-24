@@ -1,0 +1,15 @@
+{
+    "cmake.configureOnOpen": false,
+    "idf.adapterTargetName": "esp32s3",
+    "idf.openOcdConfigs": [
+        "board/esp32s3-builtin.cfg"
+    ],
+    "idf.flashType": "UART",
+    "idf.portWin": "COM7",
+    "files.associations": {
+        "*.make": "makefile",
+        "event_groups.h": "c",
+        "freertos.h": "c",
+        "vfs_tinyusb.h": "c"
+    }
+}
