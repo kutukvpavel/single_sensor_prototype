@@ -9,10 +9,6 @@
 #define OVERSAMPLING_LEN 32
 
 //static const char *TAG = "ADC";
-static Average<uint32_t> average_vr4(OVERSAMPLING_LEN);
-static Average<uint32_t> average_ih(OVERSAMPLING_LEN);
-static Average<uint32_t> average_vdiv(OVERSAMPLING_LEN);
-static Average<uint32_t> average_vh_monitor(OVERSAMPLING_LEN);
 
 enum my_adc_channels {
     v_r4,

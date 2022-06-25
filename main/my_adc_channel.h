@@ -3,6 +3,7 @@
 #include "average.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
+#include <stdint.h>
 
 #define ADC_BITS (static_cast<adc_bits_width_t>(ADC_WIDTH_BIT_DEFAULT))
 
