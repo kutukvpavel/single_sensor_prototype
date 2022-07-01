@@ -7,6 +7,7 @@
 
 #include "my_adc_channel.h"
 #include "my_dac.h"
+#include "my_uart.h"
 #include "macros.h"
 
 #define OVERSAMPLING_LEN 32
@@ -15,6 +16,12 @@
 #define MY_DAC_MAX 6.0 //V
 #define MY_DAC_RESOLUTION 1024.0 //Steps
 #define MY_DAC_CAL (MY_DAC_RESOLUTION / MY_DAC_MAX)
+#define HEATER_COEF 0.0025
+#define R4 100000.0 //Ohms
+#define V_H_MON_MULT 8.0
+#define CURRENT_SHUNT 2.0 //Ohms
+#define CURRENT_AMPLIFICATION 2.0 //Times
+#define I_H_MULT (1/(CURRENT_SHUNT*CURRENT_AMPLIFICATION))
 
 //static const char *TAG = "ADC";
 
@@ -30,9 +37,20 @@ static my_adc_channel channels[] = {
     my_adc_channel(ADC1_CHANNEL_8, ADC_ATTEN_DB_0, "V_r4", OVERSAMPLING_LEN),
     my_adc_channel(ADC1_CHANNEL_9, ADC_ATTEN_DB_0, "V_div", OVERSAMPLING_LEN)
 };
+static float rt_resistance = 0;
 
 extern "C" {
     void app_main(void);
+}
+
+float calc_resistance(float vr4, float vdiv, float ref)
+{
+    return R4 * (vdiv - vr4) / vr4;
+}
+
+float calc_temperature(float voltage, float current)
+{
+    return (voltage * V_H_MON_MULT / (current * I_H_MULT) - rt_resistance) * HEATER_COEF;
 }
 
 void app_main(void)
@@ -43,6 +61,7 @@ void app_main(void)
     //vTaskDelay(pdMS_TO_TICKS(1000)); //For the voltages to stabilize
     ets_delay_us(100000);
 
+    my_uart::init();
     my_adc::init();
     for (auto &&i : channels)
     {
@@ -55,7 +74,7 @@ void app_main(void)
         {
             buffer[i] = channels[i].get_value();
         }
-        if (counter++ % (OVERSAMPLING_RATE / SAMPLING_RATE) == 0) 
+        if ((counter++ % (OVERSAMPLING_RATE / SAMPLING_RATE) == 0) && my_uart::get_operate()) 
         {
             printf("mV: %6.1f; %6.1f; %6.1f; %6.1f\n", 
                 buffer[my_adc_channels::v_r4],
@@ -63,9 +82,10 @@ void app_main(void)
                 buffer[my_adc_channels::v_h_mon],
                 buffer[my_adc_channels::i_h]
                 );
-            float setpoint = my_dac::get() + 0.1;
-            if (setpoint >= MY_DAC_MAX) setpoint = 0;
-            my_dac::set(setpoint);
+            my_dac::set(my_uart::next(
+                calc_temperature(buffer[my_adc_channels::v_h_mon], buffer[my_adc_channels::i_h]), 
+                calc_resistance(buffer[my_adc_channels::v_r4], buffer[my_adc_channels::v_div], R4)
+                ));
         }
         vTaskDelay(pdMS_TO_TICKS(1000 / OVERSAMPLING_RATE));
     }

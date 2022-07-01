@@ -11,5 +11,6 @@
         "event_groups.h": "c",
         "freertos.h": "c",
         "vfs_tinyusb.h": "c"
-    }
+    },
+    "idf.port": "/dev/ttyUSB0"
 }
