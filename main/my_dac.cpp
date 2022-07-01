@@ -22,13 +22,16 @@ gpio_num_t dac_pins[] = //LSB->MSB
     GPIO_NUM_2,
     GPIO_NUM_1
 };
-
 gpio_num_t clk_pin = GPIO_NUM_13;
+
+float calibration = 1;
+float last = 0;
 
 namespace my_dac
 {
-    void init()
+    void init(float cal)
     {
+        calibration = cal;
         gpio_config_t io_conf = {};
         //disable interrupt
         io_conf.intr_type = GPIO_INTR_DISABLE;
@@ -49,14 +52,20 @@ namespace my_dac
         set(0);
         ESP_LOGI(TAG, "DAC initialized.");
     }
-    void set(uint16_t mv)
+    void set(float volt)
     {
+        last = volt;
+        uint16_t code = static_cast<uint16_t>(volt * calibration + 0.5);
         gpio_set_level(clk_pin, 0);
         for (size_t i = 0; i < ARRAY_SIZE(dac_pins); i++)
         {
-            gpio_set_level(dac_pins[i], (mv & (1u << i)) > 0);
+            gpio_set_level(dac_pins[i], (code & (1u << i)) > 0);
         }
         ets_delay_us(1);
         gpio_set_level(clk_pin, 1);
+    }
+    float get()
+    {
+        return last;
     }
 }

@@ -4,6 +4,7 @@
 
 namespace my_dac
 {
-    void init();
-    void set(uint16_t mv);
+    void init(float cal);
+    void set(float volt);
+    float get();
 }

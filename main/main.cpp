@@ -12,6 +12,9 @@
 #define OVERSAMPLING_LEN 32
 #define SAMPLING_RATE 10
 #define OVERSAMPLING_RATE 500
+#define MY_DAC_MAX 6.0 //V
+#define MY_DAC_RESOLUTION 1024.0 //Steps
+#define MY_DAC_CAL (MY_DAC_RESOLUTION / MY_DAC_MAX)
 
 //static const char *TAG = "ADC";
 
@@ -45,19 +48,25 @@ void app_main(void)
     {
         i.init(); //TODO: handle errors
     }
-    my_dac::init();
+    my_dac::init(MY_DAC_CAL);
 
     while (1) {
         for (size_t i = 0; i < ARRAY_SIZE(buffer); i++)
         {
             buffer[i] = channels[i].get_value();
         }
-        if (counter++ % (OVERSAMPLING_RATE / SAMPLING_RATE) == 0) printf("mV: %6.1f; %6.1f; %6.1f; %6.1f\n", 
-            buffer[my_adc_channels::v_r4],
-            buffer[my_adc_channels::v_div],
-            buffer[my_adc_channels::v_h_mon],
-            buffer[my_adc_channels::i_h]
-            );
+        if (counter++ % (OVERSAMPLING_RATE / SAMPLING_RATE) == 0) 
+        {
+            printf("mV: %6.1f; %6.1f; %6.1f; %6.1f\n", 
+                buffer[my_adc_channels::v_r4],
+                buffer[my_adc_channels::v_div],
+                buffer[my_adc_channels::v_h_mon],
+                buffer[my_adc_channels::i_h]
+                );
+            float setpoint = my_dac::get() + 0.1;
+            if (setpoint >= MY_DAC_MAX) setpoint = 0;
+            my_dac::set(setpoint);
+        }
         vTaskDelay(pdMS_TO_TICKS(1000 / OVERSAMPLING_RATE));
     }
 }
