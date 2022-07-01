@@ -1,7 +1,7 @@
 #include "my_adc_channel.h"
 
 #include <stdlib.h>
-#include "esp_log.h"
+#include <esp_log.h>
 
 //ADC Calibration
 #if CONFIG_IDF_TARGET_ESP32
@@ -14,7 +14,7 @@
 #define ADC_EXAMPLE_CALI_SCHEME     ESP_ADC_CAL_VAL_EFUSE_TP_FIT
 #endif
 
-static const char* TAG = "MY_ADC_CHANNEL";
+static const char* TAG = "MY_ADC";
 
 static bool adc_calibration_init(esp_adc_cal_characteristics_t* chars, adc_atten_t att)
 {
@@ -36,12 +36,14 @@ static bool adc_calibration_init(esp_adc_cal_characteristics_t* chars, adc_atten
     return cali_enable;
 }
 
-void my_adc_init()
+namespace my_adc
 {
-    //ADC1 config
-    ESP_ERROR_CHECK(adc1_config_width(ADC_BITS));
+    void init()
+    {
+        //ADC1 config
+        ESP_ERROR_CHECK(adc1_config_width(ADC_BITS));
+    }
 }
-
 
 my_adc_channel::my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t, uint32_t averaging_width) 
     : av(averaging_width), channel(ch), tag(t), attenuation(att)

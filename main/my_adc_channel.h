@@ -7,7 +7,10 @@
 
 #define ADC_BITS (static_cast<adc_bits_width_t>(ADC_WIDTH_BIT_DEFAULT))
 
-void my_adc_init();
+namespace my_adc
+{
+    void init();
+} // namespace my_adc
 
 class my_adc_channel
 {
