@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
+#include "rom/crc.h"
 
 #define CYCLE_LENGTH 600 //pts
 #define CDC_CHANNEL ((tinyusb_cdcacm_itf_t)TINYUSB_CDC_ACM_0)
@@ -18,12 +19,18 @@ static const uint8_t escape = 0x55;
 static const uint8_t resp_cmd = 0x01;
 
 static float transmit_buffer1[CYCLE_LENGTH * 2];
+static uint32_t crc_1 = ~0;
 static float transmit_buffer2[CYCLE_LENGTH * 2];
+static uint32_t crc_2 = ~0;
 static float receive_buffer[CYCLE_LENGTH] = {};
 static uint8_t receive_raw[sizeof(receive_buffer) + 100];
 static size_t cycle_counter = 0;
 static float* current_tx_buf = transmit_buffer1;
+static uint32_t* current_crc = &crc_1;
 static bool operate = false;
+static TaskHandle_t parser_task_handle;
+static QueueHandle_t parser_queue_handle;
+static SemaphoreHandle_t parser_semaphore;
 
 static const char* TAG = "USB_CDC";
 
@@ -41,16 +48,13 @@ void write_immedeately(uint8_t* buf, size_t sz)
     tinyusb_cdcacm_write_flush(CDC_CHANNEL, 0);
 }
 
-void parse_input_task(void* arg)
+void parse_input(size_t sz)
 {
-    /*static portMUX_TYPE mutex = portMUX_INITIALIZER_UNLOCKED;
-    portENTER_CRITICAL(&mutex);*/
-
     static parser_state state = parser_state::searching_for_preamble;
     static uint8_t cmd;
     static bool escape_state = false;
     static size_t argument_index;
-    for (size_t stream_index = 0; stream_index < *reinterpret_cast<size_t*>(arg); stream_index++)
+    for (size_t stream_index = 0; stream_index < sz; stream_index++)
     {
         escape_state = (escape_state ? false : receive_raw[stream_index] == escape);
         if (escape_state) 
@@ -120,15 +124,27 @@ void parse_input_task(void* arg)
             break;
         }
     }
+}
 
-    //portEXIT_CRITICAL(&mutex);
+void parser_task(void* arg)
+{
+    while (1)
+    {
+        size_t b;
+        auto r = xQueueReceive(parser_queue_handle, &b, portMAX_DELAY);
+        if (r == pdTRUE) 
+        {
+            parse_input(b);
+            xSemaphoreGive(parser_semaphore);
+        }
+    }
 }
 
 void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 {
-    /* initialization */
-    size_t rx_size = 0;
+    static size_t rx_size = 0;
 
+    xSemaphoreTake(parser_semaphore, portMAX_DELAY);
     /* read */
     esp_err_t ret = tinyusb_cdcacm_read((tinyusb_cdcacm_itf_t)itf, receive_raw, sizeof(receive_raw), &rx_size);
     if (ret == ESP_OK)
@@ -139,10 +155,7 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     {
         ESP_LOGE(TAG, "Read error");
     }
-    /*TaskHandle_t xHandle = NULL;
-    xTaskCreate(parse_input_task, "INPUT_PARSER", 4096, &rx_size, tskIDLE_PRIORITY, &xHandle);
-    configASSERT(xHandle);*/
-    parse_input_task(&rx_size);
+    xQueueSend(parser_queue_handle, &rx_size, portMAX_DELAY);
 }
 
 void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *event)
@@ -152,7 +165,7 @@ void tinyusb_cdc_line_state_changed_callback(int itf, cdcacm_event_t *event)
     ESP_LOGI(TAG, "Line state changed on channel %d: DTR:%d, RTS:%d", itf, dtr, rts);
 }
 
-void queue_for_transmit(float* buffer, size_t sz)
+void queue_for_transmit(float* buffer, size_t sz, uint32_t* crc)
 {
     static uint8_t wdt_counter = 0;
     wdt_counter++;
@@ -160,8 +173,8 @@ void queue_for_transmit(float* buffer, size_t sz)
     tinyusb_cdcacm_write_queue(CDC_CHANNEL, &resp_cmd, 1);
     tinyusb_cdcacm_write_queue(CDC_CHANNEL, reinterpret_cast<uint8_t*>(buffer), sz);
     tinyusb_cdcacm_write_queue(CDC_CHANNEL, &wdt_counter, 1);
-    uint8_t crc[4] = {};
-    tinyusb_cdcacm_write_queue(CDC_CHANNEL, crc, sizeof(crc));
+    *crc = crc32_le(*crc, &wdt_counter, sizeof(wdt_counter));
+    tinyusb_cdcacm_write_queue(CDC_CHANNEL, reinterpret_cast<uint8_t*>(crc), sizeof(crc));
     tinyusb_cdcacm_write_queue(CDC_CHANNEL, &postamble, 1);
     tinyusb_cdcacm_write_flush(CDC_CHANNEL, 0);
     ESP_LOGI(TAG, "Sent a data packet.");
@@ -178,11 +191,15 @@ namespace my_uart
         if (cycle_counter >= CYCLE_LENGTH) 
         {
             cycle_counter = 0;
-            queue_for_transmit(current_tx_buf, sizeof(transmit_buffer1));
+            *current_crc = ~*current_crc;
+            queue_for_transmit(current_tx_buf, sizeof(transmit_buffer1), current_crc);
             current_tx_buf = (current_tx_buf == transmit_buffer1 ? transmit_buffer2 : transmit_buffer1);
+            current_crc = (current_crc == &crc_1 ? &crc_2 : &crc_1);
+            *current_crc = ~0;
         }
         current_tx_buf[cycle_counter * 2] = temp;
         current_tx_buf[cycle_counter * 2 + 1] = res;
+        *current_crc = crc32_le(*current_crc, reinterpret_cast<uint8_t*>(current_tx_buf + cycle_counter * 2), sizeof(float) * 2);
         float ret = receive_buffer[cycle_counter++];
         return ret;
     }
@@ -203,14 +220,15 @@ namespace my_uart
         };
 
         ESP_ERROR_CHECK(tusb_cdc_acm_init(&amc_cfg));
-        /* the second way to register a callback */
-        /*ESP_ERROR_CHECK(tinyusb_cdcacm_register_callback(
-                            TINYUSB_CDC_ACM_0,
-                            CDC_EVENT_LINE_STATE_CHANGED,
-                            &tinyusb_cdc_line_state_changed_callback));*/
-
         ESP_LOGI(TAG, "USB initialization DONE");
 
+        parser_semaphore = xSemaphoreCreateBinary();
+        assert(parser_semaphore);
+        xSemaphoreGive(parser_semaphore);
+        parser_queue_handle = xQueueCreate(10, sizeof(size_t));
+        assert(parser_queue_handle);
+        xTaskCreatePinnedToCore(parser_task, "input_parser", 4096, NULL, 1, &parser_task_handle, 0);
+        assert(parser_task_handle);
     }
 
 }

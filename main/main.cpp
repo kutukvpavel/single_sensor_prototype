@@ -21,7 +21,7 @@
 #define V_H_MON_MULT 8.0
 #define CURRENT_SHUNT 2.0 //Ohms
 #define CURRENT_AMPLIFICATION 2.0 //Times
-#define I_H_MULT (1/(CURRENT_SHUNT*CURRENT_AMPLIFICATION))
+#define I_H_MULT (1.0/(CURRENT_SHUNT*CURRENT_AMPLIFICATION))
 
 //static const char *TAG = "ADC";
 
