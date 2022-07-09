@@ -18,6 +18,7 @@ static const uint8_t postamble = 0x81;
 static const uint8_t escape = 0x55;
 static const uint8_t resp_cmd = 0x01;
 
+//Transmission state
 static float transmit_buffer1[CYCLE_LENGTH * 2];
 static uint32_t crc_1 = ~0;
 static float transmit_buffer2[CYCLE_LENGTH * 2];
@@ -31,6 +32,9 @@ static bool operate = false;
 static TaskHandle_t parser_task_handle;
 static QueueHandle_t parser_queue_handle;
 static SemaphoreHandle_t parser_semaphore;
+//Receiver state
+static uint8_t receiver_wdt = 0;
+static uint32_t receiver_crc;
 
 static const char* TAG = "USB_CDC";
 
@@ -39,6 +43,8 @@ enum parser_state
     searching_for_preamble,
     reading_cmd,
     reading_args,
+    reading_counter,
+    reading_crc,
     postamble_encountered
 };
 
@@ -54,17 +60,28 @@ void parse_input(size_t sz)
     static uint8_t cmd;
     static bool escape_state = false;
     static size_t argument_index;
+    static bool crc_check = true;
     for (size_t stream_index = 0; stream_index < sz; stream_index++)
     {
-        escape_state = (escape_state ? false : receive_raw[stream_index] == escape);
-        if (escape_state) 
+        if (escape_state)
         {
-            stream_index++;
-            ESP_LOGI(TAG, "Escape encountered.");
+            escape_state = false;
         }
         else
         {
-            if (receive_raw[stream_index] == postamble) state = parser_state::postamble_encountered;
+            if (receive_raw[stream_index] == escape)
+            {
+                escape_state = true;
+                ESP_LOGI(TAG, "Escape encountered: next byte %x", receive_raw[stream_index]);
+                continue;
+            }
+            else
+            {
+                if (receive_raw[stream_index] == postamble)
+                    state = parser_state::postamble_encountered;
+                if (receive_raw[stream_index] == preamble)
+                    state = parser_state::searching_for_preamble;
+            }
         }
 
         switch (state)
@@ -73,15 +90,21 @@ void parse_input(size_t sz)
             if (receive_raw[stream_index] == preamble && !escape_state)
             {
                 state = parser_state::reading_cmd;
+                receiver_crc = ~0;
+                ESP_LOGI(TAG, "Preamble encountered");
             }
             break;
         case parser_state::reading_cmd:
             cmd = receive_raw[stream_index];
             state = parser_state::reading_args;
             argument_index = 0;
+            crc_check = true;
+            receiver_crc = crc32_le(receiver_crc, &cmd, sizeof(cmd));
+            ESP_LOGI(TAG, "CMD ecnountered: %u", cmd);
             break;
         case parser_state::reading_args:
         {
+            receiver_crc = crc32_le(receiver_crc, &(receive_raw[stream_index]), sizeof(receive_raw[stream_index]));
             switch (cmd)
             {
             case 'I': //INFO
@@ -92,17 +115,18 @@ void parse_input(size_t sz)
                 break;
             }
             case 0x07: //DAC
-                if (argument_index >= sizeof(receive_buffer))
+                //ESP_LOGI(TAG, "DAC voltages received #%i", argument_index);
+                *(reinterpret_cast<uint8_t*>(&(receive_buffer[argument_index / 4])) + argument_index % 4) = receive_raw[stream_index];
+                if (argument_index == (sizeof(receive_buffer) - 1))
                 {
-                    ESP_LOGE(TAG, "DAC buffer overrun prevented!");
-                    state = parser_state::searching_for_preamble;
+                    ESP_LOGI(TAG, "DAC loading finished");
+                    state = parser_state::reading_counter;
                     break;
                 }
-                ESP_LOGI(TAG, "DAC voltages received #%i", argument_index);
-                *(reinterpret_cast<uint8_t*>(&(receive_buffer[argument_index / 4])) + argument_index % 4) = receive_raw[stream_index];
                 break;
             case 0x01: //STOP
                 operate = false;
+                cycle_counter = 0;
                 ESP_LOGI(TAG, "Cycle STOP.");
                 state = parser_state::searching_for_preamble;
                 break;
@@ -117,7 +141,32 @@ void parse_input(size_t sz)
             argument_index++;
             break;
         }
+        case parser_state::reading_counter:
+            receiver_wdt = receive_raw[stream_index];
+            receiver_crc = ~crc32_le(receiver_crc, &receiver_wdt, sizeof(receiver_wdt));
+            ESP_LOGI(TAG, "Calculated CRC: %x", receiver_crc);
+            ESP_LOGI(TAG, "WDT: %u", receiver_wdt);
+            argument_index = 0;
+            state = parser_state::reading_crc;
+            break;
+        case parser_state::reading_crc:
+            ESP_LOGI(TAG, "CRC check: %x, index: %i", receive_raw[stream_index], argument_index);
+            crc_check = crc_check && (reinterpret_cast<uint8_t*>(&receiver_crc)[argument_index] == receive_raw[stream_index]);
+            if (++argument_index >= sizeof(receiver_crc))
+            {
+                if (crc_check)
+                {
+                    ESP_LOGI(TAG, "CRC OK");
+                }
+                else
+                {
+                    ESP_LOGW(TAG, "CRC ERROR");
+                }
+                state = parser_state::searching_for_preamble;
+            }
+            break;
         case parser_state::postamble_encountered:
+            ESP_LOGI(TAG, "Postamble encountered");
         default:
             state = parser_state::searching_for_preamble;
             //TODO error handling

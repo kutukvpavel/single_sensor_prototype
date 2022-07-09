@@ -18,9 +18,10 @@
 #define MY_DAC_CAL (MY_DAC_RESOLUTION / MY_DAC_MAX)
 #define HEATER_COEF 0.0025
 #define R4 100000.0 //Ohms
-#define V_H_MON_MULT 8.0
+#define V_H_MON_MULT 4.0
 #define CURRENT_SHUNT 2.0 //Ohms
 #define CURRENT_AMPLIFICATION 2.0 //Times
+#define CURRENT_OFFSET 25.35
 #define I_H_MULT (1.0/(CURRENT_SHUNT*CURRENT_AMPLIFICATION))
 
 //static const char *TAG = "ADC";
@@ -79,8 +80,8 @@ void app_main(void)
             printf("mV: %6.1f; %6.1f; %6.1f; %6.1f\n", 
                 buffer[my_adc_channels::v_r4],
                 buffer[my_adc_channels::v_div],
-                buffer[my_adc_channels::v_h_mon],
-                buffer[my_adc_channels::i_h]
+                buffer[my_adc_channels::v_h_mon] * V_H_MON_MULT,
+                buffer[my_adc_channels::i_h] * I_H_MULT - CURRENT_OFFSET
                 );
             my_dac::set(my_uart::next(
                 calc_temperature(buffer[my_adc_channels::v_h_mon], buffer[my_adc_channels::i_h]), 
