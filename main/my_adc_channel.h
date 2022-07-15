@@ -20,8 +20,10 @@ private:
     const char* tag;
     esp_adc_cal_characteristics_t adc_chars;
     adc_atten_t attenuation;
+    float gain_correction;
+    float offset_correction;
 public:
-    my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t, uint32_t averaging_width);
+    my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t, uint32_t averaging_width, float gain, float offset);
     ~my_adc_channel();
     float get_value();
     const char* get_tag();

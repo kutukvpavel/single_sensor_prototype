@@ -45,8 +45,8 @@ namespace my_adc
     }
 }
 
-my_adc_channel::my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t, uint32_t averaging_width) 
-    : av(averaging_width), channel(ch), tag(t), attenuation(att)
+my_adc_channel::my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t, uint32_t averaging_width, float gain, float offset) 
+    : av(averaging_width), channel(ch), tag(t), attenuation(att), gain_correction(gain), offset_correction(offset)
 {
     
 }
@@ -70,7 +70,7 @@ bool my_adc_channel::init()
 float my_adc_channel::get_value()
 {
     uint32_t voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(channel), &adc_chars);
-    return av.rolling(voltage);
+    return av.rolling(voltage) * gain_correction + offset_correction;
 }
 
 const char* my_adc_channel::get_tag()

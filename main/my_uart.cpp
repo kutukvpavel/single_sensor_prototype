@@ -128,12 +128,12 @@ void parse_input(size_t sz)
                 operate = false;
                 cycle_counter = 0;
                 ESP_LOGI(TAG, "Cycle STOP.");
-                state = parser_state::searching_for_preamble;
+                state = parser_state::reading_counter;
                 break;
             case 0x02: //START
                 operate = true;
                 ESP_LOGI(TAG, "Cycle START.");
-                state = parser_state::searching_for_preamble;
+                state = parser_state::reading_counter;
                 break;
             default:
                 break;
