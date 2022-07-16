@@ -22,6 +22,7 @@ static const uint8_t escape = 0x55;
  */
 #define RSP_OK 0x00
 #define RSP_BAD_CRC 0xFE
+#define NO_STD_RSP 0xFF
 
 #define CMD_STOP 0x01
 #define CMD_START 0x02
@@ -42,7 +43,6 @@ static const uint8_t escape = 0x55;
 #define RSP_NO_DATA 0x01
 
 #define ENABLE_DEBUG_INFO_CMD 1
-#define NO_STD_RSP 0xFF
 
 /***
  * Internal defines
@@ -77,10 +77,13 @@ namespace receiver
     };
 
     //Receiver state
+    static float buffer1[CYCLE_LENGTH] = {};
+    static float buffer2[CYCLE_LENGTH] = {};
     static size_t cycle_counter = 0;
-    static float receive_buffer[CYCLE_LENGTH] = {};
-    static float* current_element = receive_buffer;
-    static uint8_t receive_raw[sizeof(receive_buffer) + 100];
+    static float* current_buffer = buffer1;
+    static float* current_element = current_buffer;
+    static float* next_buffer = buffer2;
+    static uint8_t receive_raw[sizeof(buffer1) + 100];
     static uint8_t receiver_wdt = 0;
     static uint32_t receiver_crc;
     static TaskHandle_t parser_task_handle;
@@ -142,7 +145,7 @@ namespace receiver
     void cycle_end()
     {
         cycle_counter = 0;
-        current_element = receive_buffer;
+        current_element = current_buffer;
     }
 
     void process_args(uint8_t cmd, size_t& argument_index, size_t& stream_index, parser_state& state, uint8_t& response)
@@ -150,15 +153,24 @@ namespace receiver
         switch (cmd)
         {
         case CMD_SET_TEMP_CYCLE: // DAC
-            *(reinterpret_cast<uint8_t *>(&(receive_buffer[argument_index / 4])) + argument_index % 4) = receive_raw[stream_index];
-            if (argument_index == (sizeof(receive_buffer) - 1))
+            reinterpret_cast<uint8_t*>(next_buffer)[argument_index] = receive_raw[stream_index];
+            if (argument_index == (CYCLE_LENGTH - 1))
             {
+                auto temp = current_buffer;
+                current_buffer = next_buffer;
+                next_buffer = temp;
+                cycle_end();
+                transmitter::cycle_end();
                 ESP_LOGI(TAG, "DAC loading finished");
                 state = parser_state::reading_counter;
                 response = RSP_OK;
                 break;
             }
             break;
+        /*case CMD_SET_HEATER_PARAMS:
+            break;
+        case CMD_SET_MEASURE_PARAMS:
+            break;*/
         default:
             my_uart::raise_error(my_error_codes::unknown_cmd);
             state = parser_state::searching_for_preamble;
@@ -180,16 +192,30 @@ namespace receiver
         }
 #endif
         case CMD_STOP:
-            my_uart::operate = false;
-            cycle_end();
-            transmitter::cycle_end();
-            response = RSP_OK;
-            ESP_LOGI(TAG, "Cycle STOP.");
+            if (my_uart::operate)
+            {
+                my_uart::operate = false;
+                cycle_end();
+                transmitter::cycle_end();
+                response = RSP_OK;
+                ESP_LOGI(TAG, "Cycle STOP.");
+            }
+            else
+            {
+                response = RSP_ALREADY_IN_REQUESTED_STATE;
+            }
             break;
         case CMD_START: // START
-            my_uart::operate = true;
-            response = RSP_OK;
-            ESP_LOGI(TAG, "Cycle START.");
+            if (my_uart::operate)
+            {
+                response = RSP_ALREADY_IN_REQUESTED_STATE;
+            }
+            else
+            {
+                my_uart::operate = true;
+                response = RSP_OK;
+                ESP_LOGI(TAG, "Cycle START.");
+            }
             break;
         case CMD_GET_DATA:
             transmitter::send_cycle_data();
@@ -219,6 +245,7 @@ namespace receiver
         static size_t argument_index;
         static bool crc_check = true;
         static uint8_t response = NO_STD_RSP;
+        static bool cmd_complete;
         for (size_t stream_index = 0; stream_index < sz; stream_index++)
         {
             if (escape_state)
@@ -235,10 +262,8 @@ namespace receiver
                 }
                 else
                 {
-                    if (receive_raw[stream_index] == postamble)
-                        state = parser_state::postamble_encountered;
-                    if (receive_raw[stream_index] == preamble)
-                        state = parser_state::searching_for_preamble;
+                    if (receive_raw[stream_index] == postamble) state = parser_state::postamble_encountered;
+                    if (receive_raw[stream_index] == preamble) state = parser_state::searching_for_preamble;
                 }
             }
 
@@ -250,6 +275,7 @@ namespace receiver
                     state = parser_state::reading_cmd;
                     receiver_crc = ~0;
                     response = NO_STD_RSP;
+                    cmd_complete = false;
                     ESP_LOGI(TAG, "Preamble encountered");
                 }
                 break;
@@ -286,26 +312,42 @@ namespace receiver
                 break;
             }
             case parser_state::reading_crc:
-                ESP_LOGI(TAG, "CRC check: %x, index: %i", receive_raw[stream_index], argument_index);
-                crc_check = crc_check && (reinterpret_cast<uint8_t *>(&receiver_crc)[argument_index] == receive_raw[stream_index]);
-                if (++argument_index >= sizeof(receiver_crc))
+                if (cmd_complete)
                 {
-                    if (crc_check)
-                    {
-                        ESP_LOGI(TAG, "CRC OK");
-                    }
-                    else
-                    {
-                        response = RSP_BAD_CRC;
-                        ESP_LOGW(TAG, "CRC ERROR");
-                    }
-                    if (response != NO_STD_RSP) transmitter::send_cmd_response(cmd, response);
+                    my_uart::raise_error(my_error_codes::incorrect_command_format);
                     state = parser_state::searching_for_preamble;
+                }
+                else
+                {
+                    ESP_LOGI(TAG, "CRC check: %x, index: %i", receive_raw[stream_index], argument_index);
+                    crc_check = crc_check && 
+                        (reinterpret_cast<uint8_t *>(&receiver_crc)[argument_index] == receive_raw[stream_index]);
+                    if (++argument_index == sizeof(receiver_crc))
+                    {
+                        if (crc_check)
+                        {
+                            ESP_LOGI(TAG, "CRC OK");
+                        }
+                        else
+                        {
+                            response = RSP_BAD_CRC;
+                            ESP_LOGW(TAG, "CRC ERROR");
+                        }
+                        if (response != NO_STD_RSP) transmitter::send_cmd_response(cmd, response);
+                        cmd_complete = true;
+                        //Should encounter the postamble byte next and automatically switch the state
+                    }
                 }
                 break;
             case parser_state::postamble_encountered:
+                if (!cmd_complete)
+                {
+                    my_uart::raise_error(my_error_codes::incorrect_command_format);
+                }
+                state = parser_state::searching_for_preamble;
+                cmd_complete = false;
                 ESP_LOGI(TAG, "Postamble encountered");
-                //Intentional fall through
+                break;
             default:
                 my_uart::raise_error(my_error_codes::uart_parser_error);
                 state = parser_state::searching_for_preamble;
@@ -459,6 +501,7 @@ namespace my_uart
     void raise_error(my_error_codes err)
     {
         error_codes |= err;
+        ESP_LOGI(TAG, "Error raised: %x", static_cast<uint32_t>(error_codes));
     }
     bool get_operate()
     {

@@ -65,10 +65,12 @@ void app_main(void)
 
     my_uart::init();
     my_adc::init();
+    bool init_ok = true;
     for (auto &&i : channels)
     {
-        i.init(); //TODO: handle errors
+        init_ok = init_ok && i.init();
     }
+    if (!init_ok) my_uart::raise_error(my_error_codes::software_init);
     my_dac::init(MY_DAC_CAL);
     my_dac::set(my_uart::first());
 

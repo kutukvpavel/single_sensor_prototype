@@ -12,7 +12,8 @@ enum my_error_codes : uint32_t
     software_init = _BV(2),
     unknown_cmd = _BV(3),
     missed_packet = _BV(4),
-    uart_parser_error = _BV(5)
+    uart_parser_error = _BV(5),
+    incorrect_command_format = _BV(6)
 };
 inline my_error_codes operator|(my_error_codes a, my_error_codes b)
 {
