@@ -154,7 +154,7 @@ namespace receiver
         {
         case CMD_SET_TEMP_CYCLE: // DAC
             reinterpret_cast<uint8_t*>(next_buffer)[argument_index] = receive_raw[stream_index];
-            if (argument_index == (CYCLE_LENGTH - 1))
+            if (argument_index == (sizeof(buffer1) - 1))
             {
                 auto temp = current_buffer;
                 current_buffer = next_buffer;
@@ -224,6 +224,7 @@ namespace receiver
             response = transmitter::have_data ? RSP_OK : RSP_NO_DATA;
             break;
         case CMD_GET_ERROR:
+            ESP_LOGI(TAG, "Current error flags: %x", static_cast<uint32_t>(my_uart::error_codes));
             transmitter::send_buffer(CMD_GET_ERROR,
                                      reinterpret_cast<uint8_t *>(&my_uart::error_codes),
                                      sizeof(my_uart::error_codes));
@@ -303,9 +304,10 @@ namespace receiver
                 {
                     receiver_wdt = wdt;
                     my_uart::raise_error(my_error_codes::missed_packet);
+                    ESP_LOGI(TAG, "WDT error detected");
                 }
                 receiver_crc = ~crc32_le(receiver_crc, &receiver_wdt, sizeof(receiver_wdt));
-                ESP_LOGI(TAG, "Calculated CRC: %x", receiver_crc);
+                ESP_LOGI(TAG, "Calculated inbound CRC: %x", receiver_crc);
                 ESP_LOGI(TAG, "WDT: %u", receiver_wdt);
                 argument_index = 0;
                 state = parser_state::reading_crc;
@@ -389,7 +391,7 @@ namespace receiver
 
 namespace transmitter
 {
-    static uint8_t crc_dump_init_value;
+    static uint32_t crc_dump_init_value;
 
     void write_immedeately(uint8_t* buf, size_t sz)
     {
@@ -404,15 +406,40 @@ namespace transmitter
         send_precalc_buffer(cmd, buffer, sz, crc);
     }
 
+    void escape_helper(uint8_t*& current, uint8_t value)
+    {
+        switch (value)
+        {
+        case preamble:
+        case postamble:
+        case escape:
+            *current++ = escape;
+            break;
+        default:
+            break;
+        }
+        *current++ = value;
+    }
+
     void send_precalc_buffer(uint8_t cmd, uint8_t* buffer, size_t sz, uint32_t crc)
     {
-        tinyusb_cdcacm_write_queue(CDC_CHANNEL, &preamble, sizeof(preamble));
-        tinyusb_cdcacm_write_queue(CDC_CHANNEL, &cmd, sizeof(cmd));
-        tinyusb_cdcacm_write_queue(CDC_CHANNEL, buffer, sz);
-        tinyusb_cdcacm_write_queue(CDC_CHANNEL, &wdt_counter, sizeof(wdt_counter));
+        static uint8_t escape_buffer[TRANSMIT_BUFFER_SIZE * sizeof(float) * 2];
         crc = ~crc32_le(crc, &wdt_counter, sizeof(wdt_counter));
-        tinyusb_cdcacm_write_queue(CDC_CHANNEL, reinterpret_cast<uint8_t*>(&crc), sizeof(crc));
-        tinyusb_cdcacm_write_queue(CDC_CHANNEL, &postamble, sizeof(postamble));
+        ESP_LOGI(TAG, "Outbound CRC: %x", crc);
+        uint8_t* current = escape_buffer;
+        *current++ = preamble;
+        escape_helper(current, cmd);
+        for (size_t i = 0; i < sz; i++)
+        {
+            escape_helper(current, buffer[i]);
+        }
+        escape_helper(current, wdt_counter);
+        for (size_t i = 0; i < sizeof(crc); i++)
+        {
+            escape_helper(current, reinterpret_cast<uint8_t*>(&crc)[i]);
+        }
+        *current++ = postamble;
+        tinyusb_cdcacm_write_queue(CDC_CHANNEL, escape_buffer, current - escape_buffer);
         tinyusb_cdcacm_write_flush(CDC_CHANNEL, 0);
         wdt_counter++;
         ESP_LOGI(TAG, "Sent a data packet.");
@@ -441,6 +468,8 @@ namespace transmitter
         empty_buffer->crc = crc32_le(empty_buffer->crc,
             reinterpret_cast<uint8_t*>(empty_buffer->current - FLOATS_PER_POINT), 
             sizeof(float) * FLOATS_PER_POINT);
+        ESP_LOGI(TAG, "Incremental CRC: %x, float1: %x, float2: %x", ~empty_buffer->crc, 
+            *reinterpret_cast<uint32_t*>(&temp), *reinterpret_cast<uint32_t*>(&res));
     }
 
     void cycle_end()
@@ -462,7 +491,7 @@ namespace transmitter
     {
         static const uint8_t cmd_designator = CMD_GET_DATA;
 
-        assert((sizeof(buffers) / sizeof(buffer_t)) == buffers_count);
+        assert((sizeof(buffers) / sizeof(buffer_t*)) == buffers_count);
         assert(sizeof(data_buffer1) == sizeof(data_buffer2));
         transmit_mutex = xSemaphoreCreateMutex();
         assert(transmit_mutex);

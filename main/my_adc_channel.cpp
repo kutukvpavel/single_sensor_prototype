@@ -1,4 +1,5 @@
 #include "my_adc_channel.h"
+#include "my_params.h"
 
 #include <stdlib.h>
 #include <esp_log.h>
@@ -38,6 +39,14 @@ static bool adc_calibration_init(esp_adc_cal_characteristics_t* chars, adc_atten
 
 namespace my_adc
 {
+    my_adc_channel channels[MY_ADC_CHANNEL_NUM] = 
+    {
+        my_adc_channel(ADC1_CHANNEL_3, ADC_ATTEN_DB_0, "I_h"),
+        my_adc_channel(ADC1_CHANNEL_4, ADC_ATTEN_DB_6, "V_h_mon"),
+        my_adc_channel(ADC1_CHANNEL_8, ADC_ATTEN_DB_0, "V_r4"),
+        my_adc_channel(ADC1_CHANNEL_9, ADC_ATTEN_DB_0, "V_div")
+    };
+
     void init()
     {
         //ADC1 config
@@ -45,17 +54,19 @@ namespace my_adc
     }
 }
 
-my_adc_channel::my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t, uint32_t averaging_width, float gain, float offset) 
-    : av(averaging_width), channel(ch), tag(t), attenuation(att), gain_correction(gain), offset_correction(offset)
+my_adc_channel::my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t) 
+    : channel(ch), tag(t), attenuation(att)
 {
-    
+    calibration = &my_params::default_adc_cal;
+    av = new Average<uint32_t>(my_params::get_timings()->averaging_len);
 }
 my_adc_channel::~my_adc_channel()
 {
-    av.~Average();
+    av->~Average();
+    delete av;
 }
 
-bool my_adc_channel::init()
+bool my_adc_channel::init(const my_adc_cal_t* cal)
 {
     bool cali_enable = adc_calibration_init(&adc_chars, attenuation);
     if (!cali_enable)
@@ -64,13 +75,14 @@ bool my_adc_channel::init()
         return false;
     }
     ESP_ERROR_CHECK(adc1_config_channel_atten(channel, attenuation));
+    calibration = cal;
     return true;
 }
 
 float my_adc_channel::get_value()
 {
     uint32_t voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(channel), &adc_chars);
-    return av.rolling(voltage) * gain_correction + offset_correction;
+    return av->rolling(voltage) * calibration->gain + calibration->offset;
 }
 
 const char* my_adc_channel::get_tag()

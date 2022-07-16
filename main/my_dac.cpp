@@ -3,6 +3,7 @@
 #include <rom/ets_sys.h>
 #include <esp_log.h>
 
+#include "my_params.h"
 #include "macros.h"
 
 #define MY_DAC_REF 3.0 //V
@@ -24,12 +25,12 @@ gpio_num_t dac_pins[] = //LSB->MSB
 };
 gpio_num_t clk_pin = GPIO_NUM_13;
 
-float calibration = 1;
+const my_dac_cal_t* calibration = &my_params::default_dac_cal;
 float last = 0;
 
 namespace my_dac
 {
-    void init(float cal)
+    void init(const my_dac_cal_t* cal)
     {
         calibration = cal;
         gpio_config_t io_conf = {};
@@ -55,7 +56,7 @@ namespace my_dac
     void set(float volt)
     {
         last = volt;
-        uint16_t code = static_cast<uint16_t>(volt * calibration + 0.5);
+        uint16_t code = static_cast<uint16_t>(volt * calibration->gain + 0.5 + calibration->offset);
         gpio_set_level(clk_pin, 0);
         for (size_t i = 0; i < ARRAY_SIZE(dac_pins); i++)
         {
