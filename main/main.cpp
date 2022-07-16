@@ -70,8 +70,10 @@ void app_main(void)
         i.init(); //TODO: handle errors
     }
     my_dac::init(MY_DAC_CAL);
+    my_dac::set(my_uart::first());
 
     while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000 / OVERSAMPLING_RATE));
         for (size_t i = 0; i < ARRAY_SIZE(buffer); i++)
         {
             buffer[i] = channels[i].get_value();
@@ -89,6 +91,5 @@ void app_main(void)
                 calc_resistance(buffer[my_adc_channels::v_r4], buffer[my_adc_channels::v_div], R4)
                 ));
         }
-        vTaskDelay(pdMS_TO_TICKS(1000 / OVERSAMPLING_RATE));
     }
 }
