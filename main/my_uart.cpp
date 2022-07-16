@@ -61,6 +61,7 @@ static const char* TAG = "USB_CDC";
 namespace my_uart
 {
     static bool operate = false;
+    static my_error_codes error_codes = my_error_codes::none;
 }
 
 namespace receiver
@@ -144,6 +145,72 @@ namespace receiver
         current_element = receive_buffer;
     }
 
+    void process_args(uint8_t cmd, size_t& argument_index, size_t& stream_index, parser_state& state, uint8_t& response)
+    {
+        switch (cmd)
+        {
+        case CMD_SET_TEMP_CYCLE: // DAC
+            *(reinterpret_cast<uint8_t *>(&(receive_buffer[argument_index / 4])) + argument_index % 4) = receive_raw[stream_index];
+            if (argument_index == (sizeof(receive_buffer) - 1))
+            {
+                ESP_LOGI(TAG, "DAC loading finished");
+                state = parser_state::reading_counter;
+                response = RSP_OK;
+                break;
+            }
+            break;
+        default:
+            my_uart::raise_error(my_error_codes::unknown_cmd);
+            state = parser_state::searching_for_preamble;
+            break;
+        }
+    }
+
+    void process_cmd(uint8_t cmd, size_t& stream_index, parser_state& state, uint8_t& response)
+    {
+        switch (cmd)
+        {
+#if ENABLE_DEBUG_INFO_CMD
+        case 'I': // INFO
+        {
+            ESP_LOGI(TAG, "Info command received");
+            float test_endianess = 100.1;
+            transmitter::write_immedeately(reinterpret_cast<uint8_t *>(&test_endianess), sizeof(test_endianess));
+            break;
+        }
+#endif
+        case CMD_STOP:
+            my_uart::operate = false;
+            cycle_end();
+            transmitter::cycle_end();
+            response = RSP_OK;
+            ESP_LOGI(TAG, "Cycle STOP.");
+            break;
+        case CMD_START: // START
+            my_uart::operate = true;
+            response = RSP_OK;
+            ESP_LOGI(TAG, "Cycle START.");
+            break;
+        case CMD_GET_DATA:
+            transmitter::send_cycle_data();
+            break;
+        case CMD_GET_HAVE_DATA:
+            response = transmitter::have_data ? RSP_OK : RSP_NO_DATA;
+            break;
+        case CMD_GET_ERROR:
+            transmitter::send_buffer(CMD_GET_ERROR,
+                                     reinterpret_cast<uint8_t *>(&my_uart::error_codes),
+                                     sizeof(my_uart::error_codes));
+            my_uart::error_codes = my_error_codes::none;
+            state = parser_state::reading_counter;
+            break;
+        default:
+            state = parser_state::reading_args;
+            return;
+        }
+        state = parser_state::reading_counter;
+    }
+
     void parse_input(size_t sz)
     {
         static parser_state state = parser_state::searching_for_preamble;
@@ -187,67 +254,19 @@ namespace receiver
                 }
                 break;
             case parser_state::reading_cmd:
+            {
                 cmd = receive_raw[stream_index];
-                state = parser_state::reading_args;
                 argument_index = 0;
                 crc_check = true;
                 receiver_crc = crc32_le(receiver_crc, &cmd, sizeof(cmd));
                 ESP_LOGI(TAG, "CMD ecnountered: %u", cmd);
+                process_cmd(cmd, stream_index, state, response);
                 break;
+            }
             case parser_state::reading_args:
             {
                 receiver_crc = crc32_le(receiver_crc, &(receive_raw[stream_index]), sizeof(receive_raw[stream_index]));
-                switch (cmd)
-                {
-#if ENABLE_DEBUG_INFO_CMD
-                case 'I': // INFO
-                {
-                    ESP_LOGI(TAG, "Info command received. Skipping argument #%i", argument_index);
-                    float test_endianess = 100.1;
-                    transmitter::write_immedeately(reinterpret_cast<uint8_t *>(&test_endianess), sizeof(test_endianess));
-                    break;
-                }
-#endif
-                case CMD_SET_TEMP_CYCLE: // DAC
-                    // ESP_LOGI(TAG, "DAC voltages received #%i", argument_index);
-                    *(reinterpret_cast<uint8_t *>(&(receive_buffer[argument_index / 4])) + argument_index % 4) = receive_raw[stream_index];
-                    if (argument_index == (sizeof(receive_buffer) - 1))
-                    {
-                        ESP_LOGI(TAG, "DAC loading finished");
-                        state = parser_state::reading_counter;
-                        break;
-                    }
-                    break;
-                case CMD_STOP:
-                    my_uart::operate = false;
-                    cycle_end();
-                    transmitter::cycle_end();
-                    ESP_LOGI(TAG, "Cycle STOP.");
-                    state = parser_state::reading_counter;
-                    break;
-                case CMD_START: // START
-                    my_uart::operate = true;
-                    ESP_LOGI(TAG, "Cycle START.");
-                    state = parser_state::reading_counter;
-                    break;
-                case CMD_GET_DATA: 
-                    transmitter::send_cycle_data();
-                    state = parser_state::reading_counter;
-                    break;
-                case CMD_GET_HAVE_DATA:
-                    if (!transmitter::have_data) response = RSP_NO_DATA;
-                    state = parser_state::reading_counter;
-                    break;
-                case CMD_GET_ERROR:
-                    transmitter::send_buffer(CMD_GET_ERROR,
-                        reinterpret_cast<uint8_t*>(&my_uart::error_codes),
-                        sizeof(my_uart::error_codes));
-                    state = parser_state::reading_counter;
-                    break;
-                default:
-                    state = parser_state::reading_counter;
-                    break;
-                }
+                process_args(cmd, argument_index, stream_index, state, response);
                 argument_index++;
                 break;
             }
@@ -288,6 +307,7 @@ namespace receiver
                 ESP_LOGI(TAG, "Postamble encountered");
                 //Intentional fall through
             default:
+                my_uart::raise_error(my_error_codes::uart_parser_error);
                 state = parser_state::searching_for_preamble;
                 // TODO error handling
                 break;
@@ -436,8 +456,6 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 
 namespace my_uart
 {
-    static my_error_codes error_codes = my_error_codes::none;
-
     void raise_error(my_error_codes err)
     {
         error_codes |= err;
