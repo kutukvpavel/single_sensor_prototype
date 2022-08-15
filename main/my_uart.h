@@ -31,4 +31,5 @@ namespace my_uart
     float first();
     bool get_operate();
     void raise_error(my_error_codes err);
+    void send_pid_dbg(float temp, float voltage);
 } // namespace my_uart

@@ -7,6 +7,10 @@
 #include "macros.h"
 
 #define MY_DAC_REF 3.0 //V
+#define MY_DAC_FULL_SCALE 0x0FFF
+#define MY_DAC_ZERO_SCALE 0x0000
+
+typedef uint16_t my_adc_code_t;
 
 static const char* TAG = "MY_DAC";
 
@@ -56,7 +60,10 @@ namespace my_dac
     void set(float volt)
     {
         last = volt;
-        uint16_t code = static_cast<uint16_t>(volt * calibration->gain + 0.5 + calibration->offset);
+        volt = volt * calibration->gain + 0.5 + calibration->offset;
+        if (volt > MY_DAC_FULL_SCALE) volt = MY_DAC_FULL_SCALE;
+        else if (volt < MY_DAC_ZERO_SCALE) volt = MY_DAC_ZERO_SCALE;
+        my_adc_code_t code = static_cast<my_adc_code_t>(volt);
         gpio_set_level(clk_pin, 0);
         for (size_t i = 0; i < ARRAY_SIZE(dac_pins); i++)
         {

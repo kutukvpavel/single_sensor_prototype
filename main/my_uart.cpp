@@ -1,4 +1,5 @@
 #include "my_uart.h"
+#include "my_params.h"
 
 #include "esp_log.h"
 #include "esp_err.h"
@@ -16,6 +17,7 @@
 static const uint8_t preamble = 0x7E;
 static const uint8_t postamble = 0x81;
 static const uint8_t escape = 0x55;
+static const float debug_prefix = -100.1;
 
 /***
  * Commands 
@@ -42,7 +44,15 @@ static const uint8_t escape = 0x55;
 #define CMD_GET_HAVE_DATA 0x08
 #define RSP_NO_DATA 0x01
 
-#define ENABLE_DEBUG_INFO_CMD 1
+#define CMD_SET_PID_PARAMS 0x09
+#define CMD_SET_ADC_CAL 0x10
+#define CMD_SET_DAC_CAL 0x11
+#define CMD_SAVE_NVS 0x20
+#define CMD_GET_NVS 0xA0
+#define CMD_ENABLE_PID_DBG 0xA1
+
+// Alive indicator
+#define ENABLE_DEBUG_INFO_CMD 1 //Falls through standard communication because lacks start/end flags
 
 /***
  * Internal defines
@@ -120,7 +130,8 @@ namespace transmitter
     static SemaphoreHandle_t transmit_mutex;
     static bool have_data = false;
 
-    void write_immedeately(uint8_t* buf, size_t sz);
+    void write_immedeately(const uint8_t* buf, size_t sz);
+    void write_dbg(float val);
     void send_buffer(uint8_t cmd, uint8_t* buffer, size_t sz);
     void send_precalc_buffer(uint8_t cmd, uint8_t* buffer, size_t sz, uint32_t crc);
     void send_cmd_response(uint8_t cmd, uint8_t rsp);
@@ -136,6 +147,17 @@ namespace transmitter
 
 namespace receiver
 {
+    struct heater_params
+    {
+        float tempco;
+        float rt_resistance;
+        float rt_temp;
+    };
+    struct measure_params
+    {
+        float ref_resistance;
+    };
+
     float get_next()
     {
         if (++cycle_counter >= CYCLE_LENGTH) cycle_end();
@@ -150,11 +172,13 @@ namespace receiver
 
     void process_args(uint8_t cmd, size_t& argument_index, size_t& stream_index, parser_state& state, uint8_t& response)
     {
+        size_t lim = 0; //Last byte index (count - 1)
         switch (cmd)
         {
         case CMD_SET_TEMP_CYCLE: // DAC
+            lim = sizeof(buffer1) - 1;
             reinterpret_cast<uint8_t*>(next_buffer)[argument_index] = receive_raw[stream_index];
-            if (argument_index == (sizeof(buffer1) - 1))
+            if (argument_index == lim)
             {
                 auto temp = current_buffer;
                 current_buffer = next_buffer;
@@ -162,19 +186,82 @@ namespace receiver
                 cycle_end();
                 transmitter::cycle_end();
                 ESP_LOGI(TAG, "DAC loading finished");
-                state = parser_state::reading_counter;
-                response = RSP_OK;
                 break;
             }
             break;
-        /*case CMD_SET_HEATER_PARAMS:
+        case CMD_SET_HEATER_PARAMS:
+        {
+            static heater_params heater = {};
+            lim = sizeof(heater) - 1;
+            reinterpret_cast<uint8_t*>(&heater)[argument_index] = receive_raw[stream_index];
+            if (argument_index == lim)
+            {
+                my_params::set_heater_coef(heater.tempco);
+                my_params::set_rt_resistance(heater.rt_resistance, heater.rt_temp);
+            }
             break;
+        }
         case CMD_SET_MEASURE_PARAMS:
-            break;*/
+        {
+            static measure_params measure = {};
+            lim = sizeof(measure) - 1;
+            reinterpret_cast<uint8_t*>(&measure)[argument_index] = receive_raw[stream_index];
+            if (argument_index == lim)
+            {
+                my_params::set_ref_resistance(measure.ref_resistance);
+            }
+            break;
+        }
+        case CMD_SET_PID_PARAMS:
+        {
+            static my_pid_params_t pid = {};
+            lim = sizeof(pid) - 1;
+            reinterpret_cast<uint8_t*>(&pid)[argument_index] = receive_raw[stream_index];
+            if (argument_index == lim)
+            {
+                my_params::set_pid_params(&pid);
+            }
+            break;
+        }
+        case CMD_SET_ADC_CAL:
+        {
+            static my_adc_cal_t cal = {};
+            static uint8_t index = 0;
+            lim = sizeof(cal); // plus 1 byte for index
+            if (argument_index == 0)
+            {
+                index = receive_raw[stream_index];
+            }
+            else
+            {
+                reinterpret_cast<uint8_t *>(&cal)[argument_index - 1] = receive_raw[stream_index];
+                if (argument_index == lim)
+                {
+                    my_params::set_adc_channel_cal(index, &cal);
+                }
+            }
+            break;
+        }
+        case CMD_SET_DAC_CAL:
+        {
+            static my_dac_cal_t cal = {};
+            lim = sizeof(cal) - 1;
+            reinterpret_cast<uint8_t *>(&cal)[argument_index] = receive_raw[stream_index];
+            if (argument_index == lim)
+            {
+                my_params::set_dac_cal(&cal);
+            }
+            break;
+        }
         default:
             my_uart::raise_error(my_error_codes::unknown_cmd);
             state = parser_state::searching_for_preamble;
-            break;
+            return;
+        }
+        if (argument_index == lim)
+        {
+            state = parser_state::reading_counter;
+            response = RSP_OK;
         }
     }
 
@@ -186,8 +273,7 @@ namespace receiver
         case 'I': // INFO
         {
             ESP_LOGI(TAG, "Info command received");
-            float test_endianess = 100.1;
-            transmitter::write_immedeately(reinterpret_cast<uint8_t *>(&test_endianess), sizeof(test_endianess));
+            transmitter::write_immedeately(reinterpret_cast<const uint8_t *>(&debug_prefix), sizeof(debug_prefix));
             break;
         }
 #endif
@@ -230,6 +316,20 @@ namespace receiver
                                      sizeof(my_uart::error_codes));
             my_uart::error_codes = my_error_codes::none;
             state = parser_state::reading_counter;
+            break;
+        case CMD_GET_NVS:
+        {
+            size_t len;
+            uint8_t* buf = my_params::get_nvs_dump(&len);
+            transmitter::send_buffer(CMD_GET_NVS, buf, len);
+            break;
+        }
+        case CMD_SAVE_NVS:
+            response = (my_params::save() == ESP_OK) ? RSP_OK : RSP_SET_FAILED;
+            break;
+        case CMD_ENABLE_PID_DBG:
+            my_params::enable_pid_dbg = !my_params::enable_pid_dbg;
+            response = my_params::enable_pid_dbg ? RSP_OK : RSP_NO_DATA;
             break;
         default:
             state = parser_state::reading_args;
@@ -393,7 +493,12 @@ namespace transmitter
 {
     static uint32_t crc_dump_init_value;
 
-    void write_immedeately(uint8_t* buf, size_t sz)
+    void write_dbg(float val)
+    {
+        write_immedeately(reinterpret_cast<uint8_t*>(&val), sizeof(val));
+    }
+
+    void write_immedeately(const uint8_t* buf, size_t sz)
     {
         tinyusb_cdcacm_write_queue(CDC_CHANNEL, buf, sz);
         tinyusb_cdcacm_write_flush(CDC_CHANNEL, 0);
@@ -568,5 +673,10 @@ namespace my_uart
         receiver::init();
         transmitter::init();
     }
-
+    void send_pid_dbg(float temp, float voltage)
+    {
+        transmitter::write_dbg(debug_prefix);
+        transmitter::write_dbg(temp);
+        transmitter::write_dbg(voltage);
+    }
 }
