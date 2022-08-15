@@ -1,4 +1,5 @@
 #include "my_pid.h"
+#include "my_uart.h"
 
 #include <math.h>
 
@@ -12,7 +13,13 @@ float my_pid::next(float current_temp)
     float e = last_setpoint - current_temp;
     integral_term += e * params->timing_factor;
     if (integral_term > params->limI) integral_term = params->limI;
-    return params->kPE * e + params->kPD * (current_temp - params->ambient_temp) + params->kI * integral_term;
+    float res = params->kPE * e + params->kPD * (current_temp - params->ambient_temp) + params->kI * integral_term;
+    if (!isfinite(res))
+    {
+        res = 0;
+        my_uart::raise_error(my_error_codes::heater);
+    }
+    return res;
 }
 
 void my_pid::set(float setpoint)

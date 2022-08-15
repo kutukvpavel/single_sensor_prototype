@@ -573,8 +573,8 @@ namespace transmitter
         empty_buffer->crc = crc32_le(empty_buffer->crc,
             reinterpret_cast<uint8_t*>(empty_buffer->current - FLOATS_PER_POINT), 
             sizeof(float) * FLOATS_PER_POINT);
-        ESP_LOGI(TAG, "Incremental CRC: %x, float1: %x, float2: %x", ~empty_buffer->crc, 
-            *reinterpret_cast<uint32_t*>(&temp), *reinterpret_cast<uint32_t*>(&res));
+        /*ESP_LOGI(TAG, "Incremental CRC: %x, float1: %x, float2: %x", ~empty_buffer->crc, 
+            *reinterpret_cast<uint32_t*>(&temp), *reinterpret_cast<uint32_t*>(&res));*/
     }
 
     void cycle_end()

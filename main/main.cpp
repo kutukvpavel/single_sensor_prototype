@@ -10,6 +10,7 @@
 #include "my_uart.h"
 #include "my_params.h"
 #include "my_pid.h"
+#include "my_dbg_menu.h"
 #include "macros.h"
 
 static const char *TAG = "MAIN";
@@ -56,7 +57,9 @@ void app_main(void)
     my_dac::init(my_params::get_dac_cal());
     my_dac::set(my_uart::first());
     auto timings = my_params::get_timings();
+
     ESP_LOGI(TAG, "Setup complete.");
+    //my_dbg_menu::init();
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000 / timings->oversampling_rate));

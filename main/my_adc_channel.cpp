@@ -82,7 +82,7 @@ bool my_adc_channel::init(const my_adc_cal_t* cal)
 float my_adc_channel::get_value()
 {
     uint32_t voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(channel), &adc_chars);
-    return av->rolling(voltage) * calibration->gain + calibration->offset;
+    return av->rolling(voltage) / 1000.0f * calibration->gain + calibration->offset;
 }
 
 const char* my_adc_channel::get_tag()

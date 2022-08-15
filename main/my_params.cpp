@@ -13,7 +13,7 @@
 #define V_H_MON_MULT 4.0
 #define V_H_OFFSET 67.0
 #define CURRENT_SHUNT 2.0 //Ohms
-#define CURRENT_AMPLIFICATION 2.0 //Times
+#define CURRENT_AMPLIFICATION 1.95 //Times
 #define CURRENT_OFFSET -25.35
 #define I_H_MULT (1.0/(CURRENT_SHUNT*CURRENT_AMPLIFICATION))
 #define OVERSAMPLING_LEN 32
@@ -33,6 +33,7 @@ struct my_param_storage
     my_pid_params_t pid_params;
 };
 static const char storage_nvs_id[] = "storage";
+static const char storage_nvs_namespace[] = "my";
 my_param_storage storage = 
 {
     .adc_cals = {
@@ -45,12 +46,12 @@ my_param_storage storage =
     .timings = {OVERSAMPLING_LEN, SAMPLING_RATE, OVERSAMPLING_RATE},
     .heater_coef = HEATER_COEF,
     .ref_res = R4,
-    .rt_res = 0,
+    .rt_res = 10,
     .pid_params = {
         .kI = 0,
         .limI = 1,
-        .kPE = 0.01,
-        .kPD = 0,
+        .kPE = 0.1,
+        .kPD = 0.00,
         .setpoint_tolerance = 1,
         .timing_factor = 1.0f / OVERSAMPLING_RATE,
         .ambient_temp = my_params::rt_temp + 25
@@ -120,11 +121,16 @@ namespace my_params
     esp_err_t open_helper(nvs_handle_t* handle, nvs_open_mode_t mode)
     {
         esp_err_t err = nvs_open("my", mode, handle);
+        if (err == ESP_ERR_NVS_NOT_FOUND)
+        {
+            ESP_LOGW(TAG, "NVS namespace doesn't exist and will be created (first run?)");
+            err = nvs_open(storage_nvs_namespace, NVS_READWRITE, handle); // retry with write permissions
+        }
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Error (%s) opening NVS handle!", esp_err_to_name(err));
         }
-        else 
+        else
         {
             ESP_LOGI(TAG, "NVS handle opening SUCCESS.");
         }
