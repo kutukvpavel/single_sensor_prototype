@@ -1,5 +1,6 @@
 #include "my_dbg_menu.h"
 #include "my_params.h"
+#include "my_uart.h"
 #include "macros.h"
 
 #include "esp_log.h"
@@ -79,11 +80,73 @@ namespace my_dbg_commands
         my_pid_params_t buf = *my_params::get_pid_params();
         float* vals[] = { &buf.kPE, &buf.kPD, &buf.kI, &buf.limI, &buf.ambient_temp, &buf.timing_factor, &buf.setpoint_tolerance };
         if (argc > ARRAY_SIZE(vals)) argc = ARRAY_SIZE(vals);
+        int res = 0;
         for (size_t i = 0; i < argc; i++)
         {
-            
+            res += sscanf(argv[i], "%f", vals[i]);
         }
+        if (res > 0)
+        {
+            my_params::set_pid_params(&buf);
+            return 0;
+        }
+        return 1;
+    }
+
+    static int set_rt_res(int argc, char** argv)
+    {
+        if (argc < 2) return 1;
+        float res, temp;
+        if (sscanf(argv[0], "%f,%f", &res, &temp) == 2)
+        {
+            my_params::set_rt_resistance(res, temp);
+            return 0;
+        }
+        else
+        {
+            return 2;
+        }
+    }
+
+    static int dump_nvs(int argc, char** argv)
+    {
+        for (size_t i = 0; i < MY_ADC_CHANNEL_NUM; i++)
+        {
+            auto ch = my_params::get_adc_channel_cal(i);
+            printf("    ADC cal #%u: g=%f, o=%f", i, ch->gain, ch->offset);
+        }
+        auto pid = my_params::get_pid_params();
+        auto dac = my_params::get_dac_cal();
+        printf("    RT heater res: %f\n"
+            "   Heater alpha: %f\n"
+            "   DAC cal: g=%f, o=%f\n"
+            "   PID coefs: I=%f, limI=%f, PE=%f, PD=%f, amb=%f, tim=%f, tol=%f\n",
+            my_params::get_rt_resistance(),
+            my_params::get_heater_coef(),
+            dac->gain, dac->offset,
+            pid->kI, pid->limI, pid->kPE, pid->kPD, pid->ambient_temp, pid->timing_factor, pid->setpoint_tolerance);
         return 0;
+    }
+
+    static int operate(int argc, char** argv)
+    {
+        my_dbg_menu::operate = !my_dbg_menu::operate;
+        return 0;
+    }
+
+    static int set_profile(int argc, char** argv)
+    {
+        if (argc < 2) return 1;
+        float start, end;
+        if (sscanf(argv[0], "%f,%f", &start, &end) == 2)
+        {
+            my_uart::fill_buffer_dbg(start, end);
+            return 0;
+        }
+        else
+        {
+            return 2;
+        }
     }
 }
 
@@ -100,6 +163,30 @@ const esp_console_cmd_t commands[] =
         .help = "Set PID coefficients",
         .hint = NULL,
         .func = &my_dbg_commands::set_pid
+    },
+    {
+        .command = "dump_nvs",
+        .help = "Dump NVS data",
+        .hint = NULL,
+        .func = &my_dbg_commands::dump_nvs
+    },
+    {
+        .command = "set_rt_res",
+        .help = "Set RT heater resistance",
+        .hint = NULL,
+        .func = &my_dbg_commands::set_rt_res
+    },
+    {
+        .command = "operate",
+        .help = "Toggle operation",
+        .hint = NULL,
+        .func = &my_dbg_commands::operate
+    },
+    {
+        .command = "set_profile",
+        .help = "Set temperature profile (linear interpolation of 2 endpoints)",
+        .hint = NULL,
+        .func = &my_dbg_commands::set_profile
     }
 };
 
@@ -229,6 +316,8 @@ void parser_task(void *arg)
 
 namespace my_dbg_menu
 {
+    bool operate = false;
+
     void init()
     {
         initialize_console();

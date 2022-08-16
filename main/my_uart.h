@@ -26,6 +26,7 @@ inline my_error_codes operator|=(my_error_codes a, my_error_codes b)
 
 namespace my_uart
 {
+    void fill_buffer_dbg(float start, float end);
     void init();
     float next(float temp, float res);
     float first();

@@ -421,7 +421,7 @@ namespace receiver
                 }
                 else
                 {
-                    ESP_LOGI(TAG, "CRC check: %x, index: %i", receive_raw[stream_index], argument_index);
+                    //ESP_LOGI(TAG, "CRC check: %x, index: %i", receive_raw[stream_index], argument_index);
                     crc_check = crc_check && 
                         (reinterpret_cast<uint8_t *>(&receiver_crc)[argument_index] == receive_raw[stream_index]);
                     if (++argument_index == sizeof(receiver_crc))
@@ -632,6 +632,15 @@ void tinyusb_cdc_rx_callback(int itf, cdcacm_event_t *event)
 
 namespace my_uart
 {
+    void fill_buffer_dbg(float start, float end) //linear interp
+    {
+        float inc = (end - start) / CYCLE_LENGTH;
+        for (size_t i = 0; i < CYCLE_LENGTH; i++)
+        {
+            receiver::current_buffer[i] = start;
+            start += inc;
+        }
+    }
     void raise_error(my_error_codes err)
     {
         error_codes |= err;

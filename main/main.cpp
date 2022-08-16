@@ -59,7 +59,7 @@ void app_main(void)
     auto timings = my_params::get_timings();
 
     ESP_LOGI(TAG, "Setup complete.");
-    //my_dbg_menu::init();
+    my_dbg_menu::init();
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000 / timings->oversampling_rate));
@@ -67,17 +67,17 @@ void app_main(void)
         {
             buffer[i] = my_adc::channels[i].get_value();
         }
-        if (my_uart::get_operate())
+        if (my_uart::get_operate() || my_dbg_menu::operate)
         {
-            float current_temp = calc_temperature(buffer[my_adc_channels::v_h_mon], buffer[my_adc_channels::i_h],
+            float current_temp = calc_temperature(my_dac::get(), buffer[my_adc_channels::i_h],
                 my_params::get_rt_resistance(), my_params::rt_temp, my_params::get_heater_coef());
             if (counter++ % (timings->oversampling_rate / timings->sampling_rate) == 0) 
             {
-                printf("mV: %6.1f; %6.1f; %6.1f; mA: %6.1f\n", 
+                printf("mV: %6.1f; %6.1f; %6.1f; mA: %6.1f (%3.0f)\n", 
                     buffer[my_adc_channels::v_r4] * 1000,
                     buffer[my_adc_channels::v_div] * 1000,
                     buffer[my_adc_channels::v_h_mon] * 1000,
-                    buffer[my_adc_channels::i_h] * 1000
+                    buffer[my_adc_channels::i_h] * 1000, current_temp
                     );
                 pid.set(my_uart::next(current_temp, 
                     calc_resistance(buffer[my_adc_channels::v_r4], buffer[my_adc_channels::v_div], my_params::get_ref_resistance())
