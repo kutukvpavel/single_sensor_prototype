@@ -36,4 +36,5 @@ namespace my_params
     esp_err_t init();
     esp_err_t save();
     uint8_t* get_nvs_dump(size_t* len);
+    esp_err_t factory_reset();
 }

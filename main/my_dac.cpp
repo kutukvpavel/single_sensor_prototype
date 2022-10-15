@@ -59,6 +59,11 @@ namespace my_dac
     }
     void set(float volt)
     {
+        if (!isfinite(volt))
+        {
+            ESP_LOGW(TAG, "DAC ignored infinte value: %f", volt);
+            return;
+        }
         last = volt;
         volt = volt * calibration->gain + 0.5 + calibration->offset;
         if (volt > MY_DAC_FULL_SCALE) volt = MY_DAC_FULL_SCALE;

@@ -26,12 +26,22 @@ float calc_resistance(float vr_ref, float vdiv, float r_ref)
 
 float calc_temperature(float voltage, float current, float rt_res, float rt_temp, float tempco)
 {
-    return rt_temp + (voltage / current - rt_res) / (tempco * rt_res);
+    auto res = rt_temp + (voltage / current - rt_res) / (tempco * rt_res);
+    if (res > 1000)
+    {
+        ESP_LOGW(TAG, "Calc temp too high: v=%f, i=%f, rt_r=%f, rt_t=%f, alpha=%f", voltage, current, rt_res, rt_temp, tempco);
+    }
+    return res > rt_temp ? res : rt_temp;
 }
 
 float calc_voltage(float power, float setpoint, float rt_res, float rt_temp, float tempco)
 {
-    return sqrtf(power * rt_res * (1 + tempco * (setpoint - rt_temp)));
+    float res = sqrtf(power * rt_res * (1 + tempco * (setpoint - rt_temp)));
+    if (!isfinite(res))
+    {
+        ESP_LOGW(TAG, "Heater V is infinite: setpoint=%f, power=%f", setpoint, power);
+    }
+    return res;
 }
 
 void app_main(void)
@@ -69,22 +79,26 @@ void app_main(void)
         }
         if (my_uart::get_operate() || my_dbg_menu::operate)
         {
-            float current_temp = calc_temperature(my_dac::get(), buffer[my_adc_channels::i_h],
+            float current_temp = calc_temperature(buffer[my_adc_channels::v_h_mon], buffer[my_adc_channels::i_h],
                 my_params::get_rt_resistance(), my_params::rt_temp, my_params::get_heater_coef());
             if (counter++ % (timings->oversampling_rate / timings->sampling_rate) == 0) 
             {
-                printf("mV: %6.1f; %6.1f; %6.1f; mA: %6.1f (%3.0f)\n", 
+                printf("mV: %6.1f; %6.1f; %6.1f (%6.1f); mA: %6.1f (%3.0f)\n", 
                     buffer[my_adc_channels::v_r4] * 1000,
                     buffer[my_adc_channels::v_div] * 1000,
-                    buffer[my_adc_channels::v_h_mon] * 1000,
+                    buffer[my_adc_channels::v_h_mon] * 1000, my_dac::get() * 1000,
                     buffer[my_adc_channels::i_h] * 1000, current_temp
                     );
                 pid.set(my_uart::next(current_temp, 
                     calc_resistance(buffer[my_adc_channels::v_r4], buffer[my_adc_channels::v_div], my_params::get_ref_resistance())
                     ));
             }
-            float commanded_voltage = calc_voltage(pid.next(current_temp), pid.get_setpoint(),
+            float pid_next = pid.next(current_temp);
+            if (!isfinite(pid_next)) ESP_LOGW(TAG, "PID is infinite: %f, %f", pid_next, current_temp);
+            float commanded_voltage = calc_voltage(pid_next, pid.get_setpoint(),
                 my_params::get_rt_resistance(), my_params::rt_temp, my_params::get_heater_coef());
+            /*printf("Commanded: %6.1f, setpoint: %f, pwr: %f, temp: %3.0f, i=%f\n", commanded_voltage, pid.get_setpoint(), pid_next, current_temp,
+                buffer[my_adc_channels::i_h] * 1000);*/
             my_dac::set(commanded_voltage);
             if (my_params::enable_pid_dbg)
             {

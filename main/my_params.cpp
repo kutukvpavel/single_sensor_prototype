@@ -11,7 +11,7 @@
 #define HEATER_COEF 0.0025
 #define R4 100000.0 //Ohms
 #define V_H_MON_MULT 4.0
-#define V_H_OFFSET 0.067
+#define V_H_OFFSET 0.000
 #define CURRENT_SHUNT 2.0 //Ohms
 #define CURRENT_AMPLIFICATION 1.95 //Times
 #define CURRENT_OFFSET -0.02535
@@ -187,5 +187,12 @@ namespace my_params
     {
         *len = sizeof(storage);
         return reinterpret_cast<uint8_t*>(&storage);
+    }
+    esp_err_t factory_reset()
+    {
+        nvs_handle_t handle;
+        auto err = open_helper(&handle, NVS_READWRITE);
+        if (err != ESP_OK) return err;
+        return nvs_erase_key(handle, storage_nvs_id);
     }
 }

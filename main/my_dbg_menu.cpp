@@ -79,11 +79,11 @@ namespace my_dbg_commands
     {
         my_pid_params_t buf = *my_params::get_pid_params();
         float* vals[] = { &buf.kPE, &buf.kPD, &buf.kI, &buf.limI, &buf.ambient_temp, &buf.timing_factor, &buf.setpoint_tolerance };
-        if (argc > ARRAY_SIZE(vals)) argc = ARRAY_SIZE(vals);
+        if (argc > (ARRAY_SIZE(vals) + 1)) argc = ARRAY_SIZE(vals) + 1;
         int res = 0;
-        for (size_t i = 0; i < argc; i++)
+        for (size_t i = 1; i < argc; i++)
         {
-            res += sscanf(argv[i], "%f", vals[i]);
+            res += sscanf(argv[i], "%f", vals[i - 1]);
         }
         if (res > 0)
         {
@@ -97,7 +97,7 @@ namespace my_dbg_commands
     {
         if (argc < 2) return 1;
         float res, temp;
-        if (sscanf(argv[0], "%f,%f", &res, &temp) == 2)
+        if (sscanf(argv[1], "%f,%f", &res, &temp) == 2)
         {
             my_params::set_rt_resistance(res, temp);
             return 0;
@@ -138,7 +138,7 @@ namespace my_dbg_commands
     {
         if (argc < 2) return 1;
         float start, end;
-        if (sscanf(argv[0], "%f,%f", &start, &end) == 2)
+        if (sscanf(argv[1], "%f,%f", &start, &end) == 2)
         {
             my_uart::fill_buffer_dbg(start, end);
             return 0;
@@ -147,6 +147,16 @@ namespace my_dbg_commands
         {
             return 2;
         }
+    }
+
+    static int reset_nvs(int argc, char** argv)
+    {
+        return my_params::factory_reset();
+    }
+
+    static int save_nvs(int argc, char** argv)
+    {
+        return my_params::save();
     }
 }
 
@@ -187,6 +197,18 @@ const esp_console_cmd_t commands[] =
         .help = "Set temperature profile (linear interpolation of 2 endpoints)",
         .hint = NULL,
         .func = &my_dbg_commands::set_profile
+    },
+    {
+        .command = "reset_nvs",
+        .help = "Erase NVS storage section (reset required to load defaults)",
+        .hint = NULL,
+        .func = &my_dbg_commands::reset_nvs
+    },
+    {
+        .command = "save_nvs",
+        .help = "Save configuration to NVS",
+        .hint = NULL,
+        .func = &my_dbg_commands::save_nvs
     }
 };
 

@@ -19,6 +19,10 @@ float my_pid::next(float current_temp)
         res = 0;
         my_uart::raise_error(my_error_codes::heater);
     }
+    else if (res < 0)
+    {
+        res = 0;
+    }
     return res;
 }
 
