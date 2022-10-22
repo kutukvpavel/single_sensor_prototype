@@ -37,23 +37,6 @@ static bool adc_calibration_init(esp_adc_cal_characteristics_t* chars, adc_atten
     return cali_enable;
 }
 
-namespace my_adc
-{
-    my_adc_channel channels[MY_ADC_CHANNEL_NUM] = 
-    {
-        my_adc_channel(ADC1_CHANNEL_3, ADC_ATTEN_DB_0, "I_h"),
-        my_adc_channel(ADC1_CHANNEL_4, ADC_ATTEN_DB_6, "V_h_mon"),
-        my_adc_channel(ADC1_CHANNEL_8, ADC_ATTEN_DB_0, "V_r4"),
-        my_adc_channel(ADC1_CHANNEL_9, ADC_ATTEN_DB_0, "V_div")
-    };
-
-    void init()
-    {
-        //ADC1 config
-        ESP_ERROR_CHECK(adc1_config_width(ADC_BITS));
-    }
-}
-
 my_adc_channel::my_adc_channel(adc1_channel_t ch, adc_atten_t att, const char* t) 
     : channel(ch), tag(t), attenuation(att)
 {

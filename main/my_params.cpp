@@ -31,6 +31,8 @@ struct my_param_storage
     float ref_res;
     float rt_res;
     my_pid_params_t pid_params;
+    uint buzzer_freq_hz;
+    uint charge_pump_freq_hz;
 };
 static const char storage_nvs_id[] = "storage";
 static const char storage_nvs_namespace[] = "my";
@@ -55,7 +57,9 @@ my_param_storage storage =
         .setpoint_tolerance = 1,
         .timing_factor = 1.0f / OVERSAMPLING_RATE,
         .ambient_temp = my_params::rt_temp + 25
-    }
+    },
+    .buzzer_freq_hz = 3000,
+    .charge_pump_freq_hz = 30000
 };
 
 namespace my_params
@@ -66,6 +70,14 @@ namespace my_params
 
     bool enable_pid_dbg = false;
 
+    uint get_charge_pump_freq()
+    {
+        return storage.charge_pump_freq_hz;
+    }
+    uint get_buzzer_freq()
+    {
+        return storage.buzzer_freq_hz;
+    }
     float get_ref_resistance()
     {
         return storage.ref_res;

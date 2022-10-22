@@ -6,20 +6,11 @@
 #include <stdint.h>
 
 #define ADC_BITS (static_cast<adc_bits_width_t>(ADC_WIDTH_BIT_DEFAULT))
-#define MY_ADC_CHANNEL_NUM 4
 
 struct my_adc_cal_t
 {
     float gain;
     float offset;
-};
-
-enum my_adc_channels
-{
-    i_h,
-    v_h_mon,
-    v_r4,
-    v_div
 };
 
 class my_adc_channel
@@ -38,10 +29,3 @@ public:
     const char* get_tag();
     bool init(const my_adc_cal_t* cal);
 };
-
-namespace my_adc
-{
-    extern my_adc_channel channels[MY_ADC_CHANNEL_NUM];
-
-    void init();
-} // namespace my_adc

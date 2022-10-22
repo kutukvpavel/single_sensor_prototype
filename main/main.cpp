@@ -12,6 +12,7 @@
 #include "my_pid.h"
 #include "my_dbg_menu.h"
 #include "macros.h"
+#include "my_hal.h"
 
 static const char *TAG = "MAIN";
 
@@ -47,24 +48,18 @@ float calc_voltage(float power, float setpoint, float rt_res, float rt_temp, flo
 void app_main(void)
 {
     static uint counter = 0;
-    static float buffer[ARRAY_SIZE(my_adc::channels)];
+    static float buffer[MY_ADC_SENSING_CHANNEL_NUM];
 
     //vTaskDelay(pdMS_TO_TICKS(1000)); //For the voltages to stabilize
     ets_delay_us(100000);
 
-    my_params::init();
+    bool init_ok = my_params::init() == ESP_OK;
+    init_ok = init_ok && my_hal::init(my_params::get_buzzer_freq(), my_params::get_charge_pump_freq(),
+        my_params::get_adc_channel_cal);
     my_uart::init();
-    my_adc::init();
-
     static my_pid pid = my_pid(my_params::get_pid_params());
-
-    bool init_ok = true;
-    for (size_t i = 0; i < ARRAY_SIZE(my_adc::channels); i++)
-    {
-        init_ok = init_ok && my_adc::channels[i].init(my_params::get_adc_channel_cal(i));
-    }
-    if (!init_ok) my_uart::raise_error(my_error_codes::software_init);
     my_dac::init(my_params::get_dac_cal());
+    if (!init_ok) my_uart::raise_error(my_error_codes::software_init);
     my_dac::set(my_uart::first());
     auto timings = my_params::get_timings();
 
@@ -75,22 +70,23 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(1000 / timings->oversampling_rate));
         for (size_t i = 0; i < ARRAY_SIZE(buffer); i++)
         {
-            buffer[i] = my_adc::channels[i].get_value();
+            buffer[i] = my_hal::adc_read_channel(static_cast<my_hal::adc_channel_types>(i));
         }
         if (my_uart::get_operate() || my_dbg_menu::operate)
         {
-            float current_temp = calc_temperature(buffer[my_adc_channels::v_h_mon], buffer[my_adc_channels::i_h],
+            float current_temp = calc_temperature(buffer[my_hal::adc_channel_types::v_h_mon], buffer[my_hal::adc_channel_types::i_h],
                 my_params::get_rt_resistance(), my_params::rt_temp, my_params::get_heater_coef());
             if (counter++ % (timings->oversampling_rate / timings->sampling_rate) == 0) 
             {
                 printf("mV: %6.1f; %6.1f; %6.1f (%6.1f); mA: %6.1f (%3.0f)\n", 
-                    buffer[my_adc_channels::v_r4] * 1000,
-                    buffer[my_adc_channels::v_div] * 1000,
-                    buffer[my_adc_channels::v_h_mon] * 1000, my_dac::get() * 1000,
-                    buffer[my_adc_channels::i_h] * 1000, current_temp
+                    buffer[my_hal::adc_channel_types::v_r4] * 1000,
+                    buffer[my_hal::adc_channel_types::v_div] * 1000,
+                    buffer[my_hal::adc_channel_types::v_h_mon] * 1000, my_dac::get() * 1000,
+                    buffer[my_hal::adc_channel_types::i_h] * 1000, current_temp
                     );
                 pid.set(my_uart::next(current_temp, 
-                    calc_resistance(buffer[my_adc_channels::v_r4], buffer[my_adc_channels::v_div], my_params::get_ref_resistance())
+                    calc_resistance(buffer[my_hal::adc_channel_types::v_r4], buffer[my_hal::adc_channel_types::v_div],
+                    my_params::get_ref_resistance())
                     ));
             }
             float pid_next = pid.next(current_temp);

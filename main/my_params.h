@@ -3,6 +3,7 @@
 #include "my_adc_channel.h"
 #include "my_dac.h"
 #include "my_pid.h"
+#include "my_hal.h"
 #include <inttypes.h>
 
 struct my_timings_t
@@ -20,6 +21,8 @@ namespace my_params
     
     extern bool enable_pid_dbg;
 
+    uint get_charge_pump_freq();
+    uint get_buzzer_freq();
     float get_ref_resistance(); // For measurement
     void set_ref_resistance(float val);
     float get_heater_coef();
