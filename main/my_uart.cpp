@@ -1,5 +1,6 @@
 #include "my_uart.h"
 #include "my_params.h"
+#include "my_model.h"
 
 #include "esp_log.h"
 #include "esp_err.h"
@@ -588,6 +589,10 @@ namespace transmitter
         empty_buffer->crc = crc_dump_init_value;
         empty_buffer->current = empty_buffer->start;
         have_data = true;
+        float temp_buffer[66];
+        my_model::input->data.f = temp_buffer;
+        xTaskNotifyGive(my_model::model_task_handle);
+        ESP_LOGI("my_uart", "%f", my_model::output->data.f[0]);
 
         xSemaphoreGive(transmit_mutex);
     }

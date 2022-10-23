@@ -8,6 +8,7 @@
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/version.h"
+#include "my_model.h"
 
 namespace {
 tflite::ErrorReporter* error_reporter = nullptr;
@@ -18,7 +19,7 @@ int inference_count = 0;
 // create an area of memory to use for input, output, and intermediate arrays.
 // minimum arena size, at the time of writing. after allocating tensors
 // you can retrieve this value by invoking interpreter.arena_used_bytes().
-const int kModelArenaSize = 2468;
+const int kModelArenaSize = 2468 * 4;
 // Extra headroom for model + alignment + future interpreter changes.
 const int kExtraArenaSize = 560 + 16 + 100;
 const int kTensorArenaSize = kModelArenaSize + kExtraArenaSize;
@@ -26,14 +27,11 @@ uint8_t tensor_arena[kTensorArenaSize];
 } // namespace
 
 namespace my_model {
+
 TfLiteTensor* input;
 TfLiteTensor* output;
-static TaskHandle_t model_task_handle;
-
 static void prvInvokeInterpreter()
 {
-    float random_generated[66];
-    input->data.f = random_generated;
     interpreter->Invoke();
     ESP_LOGI("MODEL", "y: %f", output->data.f[0]);
 }
@@ -45,16 +43,18 @@ static void model_task(void* pvParameter)
     uint32_t ulNotifiedValue;
 
     for (;;) {
-        // xResult = xTaskNotifyWait(pdFALSE, ULONG_MAX, &ulNotifiedValue, xMaxBlockTime);
-        // if (xResult == pdTRUE) {
+        xResult = xTaskNotifyWait(pdFALSE, ULONG_MAX, &ulNotifiedValue, xMaxBlockTime);
+        if (xResult == pdTRUE) {
             prvInvokeInterpreter();
-        // }
+        }
     }
 }
 
 void init()
 {
     model = tflite::GetModel(model_tflite);
+    static tflite::MicroErrorReporter micro_error_reporter;
+    error_reporter = &micro_error_reporter;
     static tflite::AllOpsResolver resolver;
 
     // Build an interpreter to run the model with.
