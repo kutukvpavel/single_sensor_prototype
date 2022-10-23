@@ -12,6 +12,7 @@
 #include "my_pid.h"
 #include "my_dbg_menu.h"
 #include "macros.h"
+#include "my_model.h"
 
 static const char *TAG = "MAIN";
 
@@ -55,6 +56,7 @@ void app_main(void)
     my_params::init();
     my_uart::init();
     my_adc::init();
+    my_model::init();
 
     static my_pid pid = my_pid(my_params::get_pid_params());
 
