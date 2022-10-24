@@ -12,6 +12,11 @@ struct my_timings_t
     uint sampling_rate;
     uint oversampling_rate;
 };
+struct my_battery_threshold_t
+{
+    float low;
+    float high;
+};
 
 namespace my_params
 {
@@ -36,6 +41,10 @@ namespace my_params
     const my_timings_t* get_timings();
     const my_pid_params_t* get_pid_params();
     void set_pid_params(my_pid_params_t* p);
+
+    my_battery_threshold_t get_battery_threshold();
+    bool check_bat_t(float t);
+
     esp_err_t init();
     esp_err_t save();
     uint8_t* get_nvs_dump(size_t* len);

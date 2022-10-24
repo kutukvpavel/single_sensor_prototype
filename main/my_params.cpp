@@ -1,9 +1,11 @@
 #include "my_params.h"
 
+#include "my_hal.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "nvs_handle.hpp"
 #include "esp_log.h"
+#include "macros.h"
 
 #define MY_DAC_MAX 6.0 //V
 #define MY_DAC_RESOLUTION 1024.0 //Steps
@@ -33,34 +35,40 @@ struct my_param_storage
     my_pid_params_t pid_params;
     uint buzzer_freq_hz;
     uint charge_pump_freq_hz;
+    my_battery_threshold_t battery_volt;
+    my_battery_threshold_t battery_temp;
 };
 static const char storage_nvs_id[] = "storage";
 static const char storage_nvs_namespace[] = "my";
-my_param_storage storage = 
-{
-    .adc_cals = {
-        {I_H_MULT, CURRENT_OFFSET},
-        {V_H_MON_MULT, V_H_OFFSET},
-        my_params::default_adc_cal,
-        my_params::default_adc_cal
-    },
-    .dac_cal = my_params::default_dac_cal,
-    .timings = {OVERSAMPLING_LEN, SAMPLING_RATE, OVERSAMPLING_RATE},
-    .heater_coef = HEATER_COEF,
-    .ref_res = R4,
-    .rt_res = 10,
-    .pid_params = {
-        .kI = 0,
-        .limI = 1,
-        .kPE = 0.1,
-        .kPD = 0.00,
-        .setpoint_tolerance = 1,
-        .timing_factor = 1.0f / OVERSAMPLING_RATE,
-        .ambient_temp = my_params::rt_temp + 25
-    },
-    .buzzer_freq_hz = 3000,
-    .charge_pump_freq_hz = 30000
-};
+my_param_storage storage =
+    {
+        .adc_cals =
+            {
+                [my_hal::adc_channel_types::i_h] = {I_H_MULT, CURRENT_OFFSET},
+                [my_hal::adc_channel_types::v_h_mon] = {V_H_MON_MULT, V_H_OFFSET},
+                [my_hal::adc_channel_types::v_r4] = my_params::default_adc_cal,
+                [my_hal::adc_channel_types::v_div] = my_params::default_adc_cal,
+                [my_hal::adc_channel_types::bat_v] = {2.0f, 0},
+                [my_hal::adc_channel_types::bat_t] = {2.0f, 0}
+            },
+        .dac_cal = my_params::default_dac_cal,
+        .timings = {OVERSAMPLING_LEN, SAMPLING_RATE, OVERSAMPLING_RATE},
+        .heater_coef = HEATER_COEF,
+        .ref_res = R4,
+        .rt_res = 10,
+        .pid_params = {
+            .kI = 0,
+            .limI = 1,
+            .kPE = 0.1,
+            .kPD = 0.00,
+            .setpoint_tolerance = 1,
+            .timing_factor = 1.0f / OVERSAMPLING_RATE,
+            .ambient_temp = my_params::rt_temp + 25},
+        .buzzer_freq_hz = 3000,
+        .charge_pump_freq_hz = 30000,
+        .battery_volt = {3.05f, 3.50f},
+        .battery_temp = {0.1f, 0.5f}
+    };
 
 namespace my_params
 {
@@ -104,6 +112,8 @@ namespace my_params
     }
     const my_adc_cal_t* get_adc_channel_cal(size_t index)
     {
+        //static_assert(MY_ADC_CHANNEL_NUM == ARRAY_SIZE(default_adc_cals));
+        assert(index < MY_ADC_CHANNEL_NUM);
         return &(storage.adc_cals[index]);
     }
     void set_adc_channel_cal(size_t index, my_adc_cal_t* c)
@@ -130,6 +140,16 @@ namespace my_params
     {
         storage.pid_params = *p;
     }
+
+    my_battery_threshold_t get_battery_threshold()
+    {
+        return storage.battery_volt;
+    }
+    bool check_bat_t(float t)
+    {
+        return t <= storage.battery_temp.high && t >= storage.battery_temp.low;
+    }
+
     esp_err_t open_helper(nvs_handle_t* handle, nvs_open_mode_t mode)
     {
         esp_err_t err = nvs_open("my", mode, handle);

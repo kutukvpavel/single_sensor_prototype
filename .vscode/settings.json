@@ -10,7 +10,8 @@
         "*.make": "makefile",
         "event_groups.h": "c",
         "freertos.h": "c",
-        "vfs_tinyusb.h": "c"
+        "vfs_tinyusb.h": "c",
+        "cmath": "cpp"
     },
     "idf.port": "/dev/ttyUSB0"
 }

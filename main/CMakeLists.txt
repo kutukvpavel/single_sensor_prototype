@@ -8,5 +8,6 @@ idf_component_register(
     "main.cpp" 
     "my_adc_channel.cpp"
     "my_hal.cpp"
+    "my_battery.cpp"
                     
     INCLUDE_DIRS ".")

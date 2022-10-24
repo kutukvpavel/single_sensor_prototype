@@ -41,7 +41,7 @@ namespace my_hal
 
     bool init(uint buzzer_freq, uint shdn_pump_freq, const my_adc_cal_t* (*get_adc_cal)(size_t));
 
-    adc_code_t adc_read_channel(adc_channel_types t);
+    float adc_read_channel(adc_channel_types t);
     void sr_write(sr_types t, const uint8_t* contents);
     bool get_btn_pressed();
     bool get_vent_closed();

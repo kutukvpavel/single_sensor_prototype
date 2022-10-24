@@ -170,7 +170,7 @@ namespace my_hal
         return init_ok;
     }
 
-    adc_code_t adc_read_channel(adc_channel_types t)
+    float adc_read_channel(adc_channel_types t)
     {
         assert(t < ARRAY_SIZE(channels));
         return channels[t].get_value();
